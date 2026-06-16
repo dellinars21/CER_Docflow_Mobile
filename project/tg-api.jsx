@@ -1,14 +1,18 @@
-// tg-api.jsx — REAL Telegram Bot API client. No backend required.
+// tg-api.jsx — Telegram Bot API client (calls through the /api/telegram proxy).
 //
-// api.telegram.org returns permissive CORS headers, so getMe / getUpdates /
-// sendMessage can be called straight from the browser with fetch().
+// Telegram's API sends no CORS headers, so the browser cannot call it directly
+// (the request hangs/blocks). All calls go through the same-origin Vercel
+// serverless function in api/telegram.js, which forwards them server-side.
 //
-// SECURITY NOTE: the bot token is stored in the browser (localStorage) and is
-// therefore visible to anyone using this device / viewing network traffic.
-// That's acceptable for an internal prototype. For production, proxy these
-// calls through a small server so the token never reaches the client.
+// SECURITY NOTE: in the prototype the token is entered in the UI and stored in
+// localStorage, then passed to the proxy. For production, set TELEGRAM_BOT_TOKEN
+// as a Vercel env var instead — the proxy prefers it, so the token never has to
+// live in the browser or the repo.
 
 const TG_LS_KEY = "cer_tg_config_v1";
+// Same-origin proxy (Vercel serverless function at /api/telegram). Telegram's
+// own API has no CORS headers, so the browser must go through this hop.
+const TG_PROXY = "/api/telegram";
 
 function tgLoad() {
   try { return JSON.parse(localStorage.getItem(TG_LS_KEY)) || {}; }
@@ -21,16 +25,23 @@ function tgClearLS() {
   try { localStorage.removeItem(TG_LS_KEY); } catch (e) {}
 }
 
-// Low-level call. Throws Error(description) when Telegram reports !ok.
+// Low-level call through the proxy. Throws Error(description) when !ok.
 async function tgCall(token, method, params) {
-  const res = await fetch("https://api.telegram.org/bot" + token + "/" + method, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params || {}),
-  });
+  let res;
+  try {
+    res = await fetch(TG_PROXY, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.assign({ token, method }, params || {})),
+    });
+  } catch (e) {
+    throw new Error("Сеть недоступна. Откройте сайт, развёрнутый на Vercel.");
+  }
   let data;
   try { data = await res.json(); }
-  catch (e) { throw new Error("Не удалось связаться с Telegram (" + res.status + ")"); }
+  catch (e) {
+    throw new Error("Telegram-прокси не найден (/api/telegram). Эта функция работает на развёрнутом сайте Vercel, а не при локальном открытии файла.");
+  }
   if (!data.ok) throw new Error(data.description || ("Ошибка Telegram " + res.status));
   return data.result;
 }
