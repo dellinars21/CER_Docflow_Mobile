@@ -24,7 +24,7 @@ with open(os.path.join(HERE, "assets", "apple-touch-icon.png"), "rb") as f:
 # Load modules in dependency order (mirrors the original HTML's <script> order).
 MODULES = [
     "data.jsx", "ui.jsx", "signing.jsx", "screens.jsx",
-    "ios-frame.jsx", "mobile-app.jsx", "leave-mobile.jsx", "mobile-shell.jsx",
+    "ios-frame.jsx", "tg-api.jsx", "mobile-app.jsx", "leave-mobile.jsx", "mobile-shell.jsx",
 ]
 sources = {m: read(m) for m in MODULES}
 

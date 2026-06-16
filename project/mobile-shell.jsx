@@ -294,46 +294,90 @@ function SendSheet({ onClose, onSent, tgConnected }) {
   );
 }
 
-// ── TELEGRAM SHEET ───────────────────────────────────────────────────────────
-function TgSheet({ onClose, onConnected }) {
-  const [phase, setPhase] = mUseState("intro");
-  const open = () => { setPhase("connecting"); setTimeout(() => setPhase("done"), 1500); };
+// ── TELEGRAM SHEET — real Bot API: paste token → capture chat → send ─────────
+const tgInputStyle = { width: "100%", padding: "13px 15px", borderRadius: 14, border: "1px solid var(--border)", background: "var(--surface)", fontSize: 15, fontFamily: "inherit", color: "var(--text)", outline: "none", boxSizing: "border-box" };
+
+function TgSheet({ tg, onClose, onToast }) {
+  const [view, setView] = mUseState(tg.connected ? "manage" : "token");
+  const [token, setToken] = mUseState(tg.config.token || "");
+  const [bot, setBot] = mUseState(null);   // result of getMe
+  const [busy, setBusy] = mUseState(false);
+  const [err, setErr] = mUseState("");
+
+  const verifyToken = async () => {
+    const t = token.trim();
+    if (!t) return;
+    setBusy(true); setErr("");
+    try { const me = await tgGetMe(t); setBot(me); setView("await"); }
+    catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  const detectChat = async () => {
+    setBusy(true); setErr("");
+    try {
+      const found = await tgDetectChat(token.trim());
+      if (!found) { setErr("Сообщение не найдено. Откройте бота, отправьте любое сообщение и попробуйте снова."); setBusy(false); return; }
+      tg.save({ token: token.trim(), chatId: found.chatId, chatName: found.chatName, botName: bot ? bot.username : "" });
+      setView("manage");
+      onToast && onToast("Telegram подключён");
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  const sendTest = async () => {
+    setBusy(true);
+    const ok = await tg.send("✅ <b>CER Документооборот</b>\nТестовое сообщение — интеграция работает.");
+    setBusy(false);
+    onToast && onToast(ok ? "Сообщение отправлено в Telegram" : "Не удалось отправить");
+  };
+
+  const errBox = err ? (
+    <div style={{ width: "100%", background: "rgba(255,59,48,.1)", color: "#c1271b", fontSize: 13.5, lineHeight: 1.45, padding: "10px 13px", borderRadius: 12, marginBottom: 14, textAlign: "left" }}>{err}</div>
+  ) : null;
+
   return (
-    <MSheet onClose={onClose} title={phase === "done" ? null : "Telegram"}>
-      <div style={{ textAlign: "center", padding: "10px 6px 28px", display: "flex", flexDirection: "column", alignItems: "center" }}>
-        {phase !== "done" ? (
+    <MSheet onClose={onClose} title={view === "manage" ? null : "Telegram"}>
+      <div style={{ padding: "8px 6px 28px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+
+        {view === "token" && (
           <>
-            <div className="popIn" style={{ marginBottom: 16 }}><TelegramGlyph size={70} /></div>
-            <h2 style={{ margin: "0 0 8px", fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Подключить Telegram</h2>
-            <p style={{ margin: "0 0 22px", fontSize: 15, color: "var(--text-2)", lineHeight: 1.5, maxWidth: 300 }}>Уведомления о документах будут приходить в Telegram с отметками о прочтении.</p>
-            {phase === "intro" ? (
-              <>
-                <div style={{ width: "100%", background: "var(--surface)", borderRadius: 16, padding: 16, marginBottom: 20, textAlign: "left", display: "flex", flexDirection: "column", gap: 13 }}>
-                  {[["1", `Откройте бота ${TELEGRAM.bot}`], ["2", "Нажмите «Запустить»"], ["3", "Аккаунт связан"]].map(([n, txt]) => (
-                    <div key={n} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <span style={{ width: 26, height: 26, borderRadius: "50%", background: "#229ED9", color: "#fff", fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{n}</span>
-                      <span style={{ fontSize: 14.5, color: "var(--text)" }}>{txt}</span>
-                    </div>
-                  ))}
-                </div>
-                <MBtn kind="primary" tg icon="send" full onClick={open}>Открыть в Telegram</MBtn>
-              </>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14, padding: "6px 0 10px" }}>
-                <div className="tgSpin" style={{ width: 36, height: 36, borderRadius: "50%", border: "3px solid rgba(34,158,217,.2)", borderTopColor: "#229ED9" }} />
-                <span style={{ fontSize: 15, color: "var(--text-2)" }}>Ожидание подтверждения…</span>
-              </div>
-            )}
+            <div className="popIn" style={{ marginBottom: 14 }}><TelegramGlyph size={62} /></div>
+            <h2 style={{ margin: "0 0 8px", fontSize: 21, fontWeight: 700, color: "var(--text)", textAlign: "center" }}>Подключить Telegram</h2>
+            <p style={{ margin: "0 0 18px", fontSize: 14.5, color: "var(--text-2)", lineHeight: 1.5, maxWidth: 300, textAlign: "center" }}>Создайте бота в <b>@BotFather</b> (команда <b>/newbot</b>) и вставьте его токен.</p>
+            {errBox}
+            <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="123456789:ABCdef..." autoCapitalize="off" autoCorrect="off" spellCheck={false} style={{ ...tgInputStyle, marginBottom: 14 }} />
+            <MBtn kind="primary" tg full disabled={!token.trim() || busy} onClick={verifyToken}>{busy ? "Проверка…" : "Продолжить"}</MBtn>
+            <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" style={{ marginTop: 14, fontSize: 13.5, color: "var(--accent)", textDecoration: "none" }}>Открыть @BotFather →</a>
           </>
-        ) : (
+        )}
+
+        {view === "await" && bot && (
           <>
-            <div className="popIn" style={{ position: "relative", marginBottom: 18 }}>
-              <TelegramGlyph size={70} />
+            <div className="popIn" style={{ marginBottom: 14 }}><TelegramGlyph size={62} /></div>
+            <h2 style={{ margin: "0 0 6px", fontSize: 20, fontWeight: 700, color: "var(--text)", textAlign: "center" }}>Бот @{bot.username}</h2>
+            <p style={{ margin: "0 0 18px", fontSize: 14.5, color: "var(--text-2)", lineHeight: 1.5, maxWidth: 300, textAlign: "center" }}>Откройте бота и отправьте ему любое сообщение (например <b>/start</b>), затем вернитесь сюда.</p>
+            {errBox}
+            <a href={"https://t.me/" + bot.username} target="_blank" rel="noreferrer" style={{ width: "100%", textDecoration: "none", marginBottom: 12 }}>
+              <MBtn kind="secondary" tg icon="send" full>Открыть @{bot.username}</MBtn>
+            </a>
+            <MBtn kind="primary" full disabled={busy} onClick={detectChat}>{busy ? "Поиск чата…" : "Я отправил сообщение"}</MBtn>
+            <button onClick={() => { setView("token"); setErr(""); }} style={{ marginTop: 14, border: "none", background: "none", fontFamily: "inherit", fontSize: 13.5, color: "var(--text-3)", cursor: "pointer" }}>← Изменить токен</button>
+          </>
+        )}
+
+        {view === "manage" && (
+          <>
+            <div className="popIn" style={{ position: "relative", marginBottom: 16 }}>
+              <TelegramGlyph size={64} />
               <span style={{ position: "absolute", bottom: -4, right: -4, width: 28, height: 28, borderRadius: "50%", background: "#34c759", border: "3px solid var(--bg)", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon name="check" size={15} stroke={3} style={{ color: "#fff" }} /></span>
             </div>
-            <h2 style={{ margin: "0 0 8px", fontSize: 21, fontWeight: 700, color: "var(--text)" }}>Telegram подключён</h2>
-            <p style={{ margin: "0 0 22px", fontSize: 15, color: "var(--text-2)", lineHeight: 1.5, maxWidth: 300 }}>Уведомления приходят в чат {TELEGRAM.bot}.</p>
-            <MBtn kind="primary" full onClick={() => { onConnected(); onClose(); }}>Готово</MBtn>
+            <h2 style={{ margin: "0 0 6px", fontSize: 21, fontWeight: 700, color: "var(--text)", textAlign: "center" }}>Telegram подключён</h2>
+            <p style={{ margin: "0 0 18px", fontSize: 14.5, color: "var(--text-2)", lineHeight: 1.5, maxWidth: 300, textAlign: "center" }}>
+              Сообщения отправляются в чат <b>{tg.config.chatName || tg.config.chatId}</b>{tg.config.botName ? <> через <b>@{tg.config.botName}</b></> : null}.
+            </p>
+            <MBtn kind="primary" tg icon="send" full disabled={busy} onClick={sendTest}>{busy ? "Отправка…" : "Отправить тестовое сообщение"}</MBtn>
+            <button onClick={() => { tg.disconnect(); setBot(null); setToken(""); setView("token"); }} style={{ marginTop: 16, border: "none", background: "none", fontFamily: "inherit", fontSize: 14, color: "#ff3b30", fontWeight: 500, cursor: "pointer" }}>Отключить Telegram</button>
           </>
         )}
       </div>
@@ -368,7 +412,7 @@ function MobileApp() {
   const [signingDoc, setSigningDoc] = mUseState(null);
   const [sheet, setSheet] = mUseState(null); // 'send' | 'tg' | null
   const [toast, setToast] = mUseState(null);
-  const [tgStaff, setTgStaff] = mUseState(false);
+  const tg = useTelegram();
   const [signedIds, setSignedIds] = mUseState([]);
   const [extraSigned, setExtraSigned] = mUseState([]);
   const [extraJournal, setExtraJournal] = mUseState([]);
@@ -388,6 +432,8 @@ function MobileApp() {
 
   const onApply = (doc) => {
     const sid = doc.id;
+    const dt = DOC_TYPES[doc.type];
+    tg.send("✅ <b>Документ подписан</b>\n" + doc.title + "\nТип: " + (dt ? dt.label : doc.type) + "\nПодписал: " + USERS.director.name);
     setSignedIds((p) => [...p, sid]);
     setExtraSigned((p) => [{ ...doc, signed: "Только что", receipt: { state: "delivered", time: "" } }, ...p]);
     setExtraJournal((p) => [
@@ -404,11 +450,14 @@ function MobileApp() {
   };
 
   const onSent = (doc) => {
+    const dt = DOC_TYPES[doc.type];
+    tg.send("📄 <b>Новый документ на подпись</b>\n" + doc.title + "\nТип: " + (dt ? dt.label : doc.type) + "\nПриоритет: " + (doc.priority || "Обычный") + "\nОтправитель: " + USERS.staff.name);
     setSentDocs((p) => [doc, ...p]);
     setExtraJournal((p) => [{ id: "s" + doc.id, title: doc.title, actor: "staff", action: "submitted", when: "Только что", detail: "Отправлено на подпись" }, ...p]);
   };
 
   const onSubmitRequest = (req) => {
+    tg.send("📝 <b>Новое заявление</b>\n" + (LEAVE_TYPES[req.type] ? LEAVE_TYPES[req.type].label : req.type) + "\nОтправитель: " + USERS.staff.name);
     setExtraRequests((p) => [req, ...p]);
     setExtraJournal((p) => [{ id: "r" + req.id, title: LEAVE_TYPES[req.type].label, actor: "staff", action: "submitted", when: "Только что", detail: "Заявление в Отдел кадров" }, ...p]);
     showToast("Заявление отправлено");
@@ -439,18 +488,18 @@ function MobileApp() {
           {account === "director" && screen === "queue" && <MQueue queue={queue} onOpen={setSigningDoc} />}
           {account === "director" && screen === "signed" && <MSigned all={signedAll} />}
           {screen === "journal" && <MJournal items={journalAll} />}
-          {account === "staff" && screen === "docs" && <MDocs all={staffAll} tgConnected={tgStaff} onConnectTg={() => setSheet("tg")} onSend={() => setSheet("send")} />}
+          {account === "staff" && screen === "docs" && <MDocs all={staffAll} tgConnected={tg.connected} onConnectTg={() => setSheet("tg")} onSend={() => setSheet("send")} />}
           {account === "staff" && screen === "requests" && <MRequests requests={requestsAll} onNew={() => setSheet("leave")} onOpen={setOpenReq} />}
-          {screen === "profile" && <MProfile account={account} user={user} onSwitch={switchAccount} tgConnected={account === "director" ? true : tgStaff} onConnectTg={() => setSheet("tg")} />}
+          {screen === "profile" && <MProfile account={account} user={user} onSwitch={switchAccount} tgConnected={tg.connected} onConnectTg={() => setSheet("tg")} />}
         </div>
 
         <MTabBar tabs={tabs} active={screen} onTab={onTab} />
 
         {signingDoc && <MSign doc={signingDoc} onBack={() => setSigningDoc(null)} onApply={onApply} />}
-        {sheet === "send" && <SendSheet onClose={() => setSheet(null)} onSent={onSent} tgConnected={tgStaff} />}
+        {sheet === "send" && <SendSheet onClose={() => setSheet(null)} onSent={onSent} tgConnected={tg.connected} />}
         {sheet === "leave" && <MLeaveSheet onClose={() => setSheet(null)} onSubmit={onSubmitRequest} />}
         {openReq && <MRequestDetail req={openReq} onClose={() => setOpenReq(null)} />}
-        {sheet === "tg" && <TgSheet onClose={() => setSheet(null)} onConnected={() => setTgStaff(true)} />}
+        {sheet === "tg" && <TgSheet tg={tg} onClose={() => setSheet(null)} onToast={showToast} />}
         {sheet === "search" && <MSearch queue={queue} signed={signedAll} journal={journalAll} onOpen={(doc) => { setSheet(null); setSigningDoc(doc); }} onClose={() => setSheet(null)} />}
 
         {toast && (
